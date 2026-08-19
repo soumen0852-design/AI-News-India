@@ -2,21 +2,15 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import Parser from "rss-parser";
-import path from "path";
-import { fileURLToPath } from "url";
 
 dotenv.config();
 
 const app = express();
 const parser = new Parser({ timeout: 10000 });
-const PORT = process.env.PORT || 3000;
-const REFRESH_MINUTES = Number(process.env.NEWS_REFRESH_MINUTES || 15);
 
 app.use(cors());
 app.use(express.json());
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static("public"));
 
 const FEEDS = [
   {
@@ -46,61 +40,47 @@ const FEEDS = [
   }
 ];
 
-let cache = {
-  updatedAt: null,
-  items: []
-};
+let newsCache = [];
+let lastUpdate = 0;
 
-function cleanHtml(value = "") {
-  return value
+function cleanText(text = "") {
+  return text
     .replace(/<[^>]*>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function makeItem(item, feed) {
-  return {
-    id: Buffer.from(
-      `${feed.name}|${item.guid || item.link || item.title}`
-    ).toString("base64url"),
+async function getNews() {
+  const now = Date.now();
 
-    title: cleanHtml(item.title),
+  // Refresh every 15 minutes when the app receives traffic
+  if (newsCache.length && now - lastUpdate < 15 * 60 * 1000) {
+    return newsCache;
+  }
 
-    description: cleanHtml(
-      item.contentSnippet ||
-      item.content ||
-      ""
-    ),
-
-    link: item.link,
-
-    source: feed.name,
-
-    category: feed.category,
-
-    publishedAt:
-      item.isoDate ||
-      item.pubDate ||
-      new Date().toISOString(),
-
-    image: item.enclosure?.url || null
-  };
-}
-
-async function refreshNews() {
   const results = await Promise.allSettled(
     FEEDS.map(async feed => {
       const data = await parser.parseURL(feed.url);
 
-      return data.items
-        .slice(0, 25)
-        .map(item => makeItem(item, feed));
+      return data.items.slice(0, 20).map(item => ({
+        title: cleanText(item.title),
+        description: cleanText(
+          item.contentSnippet || item.content || ""
+        ),
+        link: item.link,
+        source: feed.name,
+        category: feed.category,
+        publishedAt:
+          item.isoDate ||
+          item.pubDate ||
+          new Date().toISOString()
+      }));
     })
   );
 
   const items = results
-    .filter(result => result.status === "fulfilled")
-    .flatMap(result => result.value)
+    .filter(x => x.status === "fulfilled")
+    .flatMap(x => x.value)
     .sort(
       (a, b) =>
         new Date(b.publishedAt) -
@@ -119,85 +99,85 @@ async function refreshNews() {
     }
   }
 
-  if (unique.length) {
-    cache = {
-      updatedAt: new Date().toISOString(),
-      items: unique
-    };
-  }
+  newsCache = unique;
+  lastUpdate = now;
 
-  return cache;
+  return newsCache;
 }
 
+
+// News API
 app.get("/api/news", async (req, res) => {
   try {
-    if (!cache.items.length) {
-      await refreshNews();
-    }
+    const category = req.query.category || "All";
+    const search = (req.query.q || "").toLowerCase();
 
-    const category =
-      String(req.query.category || "All");
-
-    const q =
-      String(req.query.q || "")
-        .toLowerCase()
-        .trim();
-
-    let items = cache.items;
+    let news = await getNews();
 
     if (category !== "All") {
-      items = items.filter(
+      news = news.filter(
         item => item.category === category
       );
     }
 
-    if (q) {
-      items = items.filter(item =>
+    if (search) {
+      news = news.filter(item =>
         `${item.title} ${item.description} ${item.source}`
           .toLowerCase()
-          .includes(q)
+          .includes(search)
       );
     }
 
     res.json({
-      updatedAt: cache.updatedAt,
-      count: items.length,
-      items: items.slice(0, 80)
+      success: true,
+      updatedAt: new Date(lastUpdate).toISOString(),
+      count: news.length,
+      items: news.slice(0, 80)
     });
 
   } catch (error) {
+    console.error(error);
+
     res.status(500).json({
-      error: "News refresh failed",
-      details: error.message
+      success: false,
+      error: "Unable to load news"
     });
   }
 });
 
+
+// Manual refresh
 app.post("/api/refresh", async (req, res) => {
   try {
-    const data = await refreshNews();
+    lastUpdate = 0;
+
+    const news = await getNews();
 
     res.json({
-      ok: true,
-      updatedAt: data.updatedAt,
-      count: data.items.length
+      success: true,
+      count: news.length,
+      message: "News refreshed successfully"
     });
 
   } catch (error) {
     res.status(500).json({
+      success: false,
       error: error.message
     });
   }
 });
 
+
+// Gemini AI Assistant
 app.post("/api/assistant", async (req, res) => {
 
-  const question =
-    String(req.body?.question || "").trim();
+  const question = String(
+    req.body?.question || ""
+  ).trim();
 
   if (!question) {
     return res.status(400).json({
-      error: "Question is required."
+      error: "Question is required"
     });
   }
 
@@ -206,7 +186,7 @@ app.post("/api/assistant", async (req, res) => {
   if (!apiKey) {
     return res.json({
       answer:
-        "Gemini AI is not connected yet. Please add GEMINI_API_KEY."
+        "Gemini AI is not connected yet. Please add your Gemini API key in Vercel Environment Variables."
     });
   }
 
@@ -218,13 +198,6 @@ app.post("/api/assistant", async (req, res) => {
 
     const url =
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-    const prompt =
-      `You are the AI News India assistant.
-Answer clearly and concisely.
-
-User question:
-${question}`;
 
     const response = await fetch(url, {
       method: "POST",
@@ -238,7 +211,12 @@ ${question}`;
           {
             parts: [
               {
-                text: prompt
+                text:
+                  `You are the AI News India Assistant.
+Answer the user's question clearly and simply.
+
+Question:
+${question}`
               }
             ]
           }
@@ -251,7 +229,7 @@ ${question}`;
     if (!response.ok) {
       throw new Error(
         data?.error?.message ||
-        "Gemini request failed"
+        "Gemini API error"
       );
     }
 
@@ -259,7 +237,7 @@ ${question}`;
       data?.candidates?.[0]?.content?.parts
         ?.map(part => part.text || "")
         .join("") ||
-      "No answer returned.";
+      "No answer available.";
 
     res.json({
       answer
@@ -267,28 +245,15 @@ ${question}`;
 
   } catch (error) {
 
+    console.error(error);
+
     res.status(500).json({
-      error: "AI assistant failed",
+      error: "AI Assistant failed",
       details: error.message
     });
   }
 });
 
-app.get("*", (req, res) => {
-  res.sendFile(
-    path.join(__dirname, "public", "index.html")
-  );
-});
 
-setInterval(
-  () => refreshNews().catch(console.error),
-  REFRESH_MINUTES * 60 * 1000
-);
-
-refreshNews().catch(console.error);
-
-app.listen(PORT, () => {
-  console.log(
-    `AI News India running at http://localhost:${PORT}`
-  );
-});
+// Export for Vercel
+export default app;
