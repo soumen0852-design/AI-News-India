@@ -2,13 +2,17 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import Parser from "rss-parser";
+import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
 
 const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const parser = new Parser({ timeout: 10000 });
 
-app.use(cors());
+app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 app.use(express.static("public"));
 
@@ -257,3 +261,6 @@ ${question}`
 
 // Export for Vercel
 export default app;
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
