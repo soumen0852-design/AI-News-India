@@ -4,18 +4,23 @@ const app = express();
 
 app.use(express.json());
 
-app.get("/", (req, res) => {
+app.get("/api/test", (req, res) => {
   res.json({
-    status: "OK",
-    message: "AI News India API is working"
+    success: true,
+    message: "AI News India API is working!"
   });
 });
 
-app.post("/assistant", (req, res) => {
-  const question = req.body?.question || "";
-
+app.get("/api/news", (req, res) => {
   res.json({
-    answer: `You asked: ${question}`
+    items: [],
+    updatedAt: new Date().toISOString()
+  });
+});
+
+app.post("/api/assistant", (req, res) => {
+  res.json({
+    answer: "AI Assistant API is connected successfully."
   });
 });
 
