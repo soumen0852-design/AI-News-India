@@ -1,4 +1,0 @@
-/workspace/
-├── index.html    (Main HTML structure)
-├── styles.css    (Complete styling with Bengali typography)
-└── script.js     (Interactive features & mock data)
