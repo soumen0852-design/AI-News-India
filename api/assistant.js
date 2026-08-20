@@ -83,4 +83,79 @@ export default async function handler(req, res) {
     });
   }
 }
+<script>
+  const chatForm = document.getElementById("chatForm");
+  const questionInput = document.getElementById("question");
+  const chat = document.getElementById("chat");
+
+  if (chatForm) {
+    chatForm.addEventListener("submit", async function (e) {
+      e.preventDefault();
+
+      const question = questionInput.value.trim();
+
+      if (!question) return;
+
+      // User message
+      const userMessage = document.createElement("div");
+      userMessage.className = "user";
+      userMessage.textContent = question;
+      chat.appendChild(userMessage);
+
+      questionInput.value = "";
+
+      // Loading
+      const loading = document.createElement("div");
+      loading.className = "bot";
+      loading.textContent = "Thinking...";
+      chat.appendChild(loading);
+
+      chat.scrollTop = chat.scrollHeight;
+
+      try {
+        const response = await fetch("/api/assistant", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            question: question
+          })
+        });
+
+        const data = await response.json();
+
+        loading.remove();
+
+        const botMessage = document.createElement("div");
+        botMessage.className = "bot";
+
+        if (data.success) {
+          botMessage.textContent = data.answer;
+        } else {
+          botMessage.textContent =
+            "Sorry, AI Assistant এখন কাজ করছে না।";
+        }
+
+        chat.appendChild(botMessage);
+
+      } catch (error) {
+        console.error(error);
+
+        loading.remove();
+
+        const errorMessage = document.createElement("div");
+        errorMessage.className = "bot";
+        errorMessage.textContent =
+          "Connection error. Please try again.";
+
+        chat.appendChild(errorMessage);
+      }
+
+      chat.scrollTop = chat.scrollHeight;
+    });
+  }
+</script>
+
+<script src="/app.js"></script>
 <script src="/app.js"></script>
