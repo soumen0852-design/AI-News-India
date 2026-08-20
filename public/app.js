@@ -270,3 +270,4 @@ document.addEventListener(
     loadNews();
   }
 );
+<script src="/app.js"></script>
